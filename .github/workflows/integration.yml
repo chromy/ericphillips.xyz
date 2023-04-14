@@ -56,7 +56,6 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           workingDirectory: ${{ github.workspace }}/ericphillips-xyz-home
-          publish: false
           postCommands: |
             wrangler kv:key put --binding=TRAFFIC build $BUILD_SHA256
         env:
