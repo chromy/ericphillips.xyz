@@ -13,7 +13,7 @@
 ## Creating Cloudflare kv namespace
 ```
 $ wrangler kv:namespace create "TRAFFIC"
-# Then add output to home-page-worker/wrangler.toml
+# Then add output to ericphillips-xyz-home/wrangler.toml
 ```
 
 ## Creating `GCP_SA_KEY`
