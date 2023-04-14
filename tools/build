@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+import os
+import sys
+import subprocess
+import pathlib
+import json
+import base64
+
+ROOT = os.path.dirname(os.path.dirname(__file__))
+OUT = os.path.join(ROOT, "out")
+SITE = os.path.join(OUT, "site")
+SRC_PATH = os.path.join(ROOT, "src")
+NODE_MODULES = os.path.join(ROOT, "node_modules")
+INDEX_TEMPLATE_PATH = os.path.join(SRC_PATH, "index.html")
+CSS_PATH = os.path.join(SRC_PATH, "style.css")
+JS_PATH = os.path.join(SRC_PATH, "script.js")
+FAVICON_PATH = os.path.join(SRC_PATH, "favicon-data-url.txt")
+OBIT_PATH = os.path.join(SRC_PATH, "obit.txt")
+PHOTOSWIPE_CSS = os.path.join(NODE_MODULES, "photoswipe", "dist", "photoswipe.css")
+
+OUTPUT_PATH = os.path.join(SITE, "index.html")
+ASSETS_PATH = os.path.join(SITE, "assets")
+
+MEMORY_HTML = '''
+<div class="flex sm:my-8 my-4">
+  <div class="mb-4 flex-shrink-0 sm:mb-0 mr-4 sm:mr-8">
+  {avatar}
+  </div>
+  <div>
+    <p class="mt-1">{message}</p>
+    <h4 style="font-variant-caps: small-caps;">{name}</h4>
+  </div>
+</div>
+'''
+
+AVATAR_PLACEHOLDER = '''
+<span class="inline-block h-16 w-16 rounded-full overflow-hidden bg-gray-100">
+  <svg class="h-full w-full text-gray-300" fill="currentColor" viewBox="0 0 24 24">
+    <path d="M24 20.993V24H0v-2.996A14.977 14.977 0 0112.004 15c4.904 0 9.26 2.354 11.996 5.993zM16.002 8.999a4 4 0 11-8 0 4 4 0 018 0z" />
+  </svg>
+</span>
+'''
+
+def check_output(*args):
+  try:
+    return subprocess.check_output(*args)
+  except subprocess.CalledProcessError as e:
+    print(e.output, file=sys.stderr)
+    exit(1)
+
+def get_obit():
+  return read(OBIT_PATH).replace("\n\n", "<p>")
+
+def read(path):
+  with open(path) as f:
+    return f.read()
+
+def get_css():
+  css = check_output([
+    "npx",
+    "tailwindcss",
+    "-i",
+    CSS_PATH,
+  ]).decode("utf8")
+  photoswipe_css = read(PHOTOSWIPE_CSS)
+  return '\n'.join([css, photoswipe_css])
+
+def get_js():
+  js = check_output([
+    "npx",
+    "esbuild",
+    "--bundle",
+    JS_PATH,
+  ]).decode("utf8")
+  return js
+
+def get_photos(names):
+  paths = [os.path.join(ASSETS_PATH, name) for name in names]
+
+  sizes = ""
+
+  count = 10
+  chunks = [paths[i:i+count] for i in range(0, len(paths), count)]
+  for chunk in chunks:
+    sizes += check_output([
+      "magick",
+      "identify",
+      "-auto-orient",
+      "-format", "%W\t%H\t%t.%e\n",
+    ] + chunk).decode("utf8")
+
+  photos = []
+
+  for line in sizes.split("\n"):
+    if not line:
+      continue
+    width, height, name = line.split("\t")
+    href = f"/assets/{name}"
+
+    data = base64.b64encode(check_output([
+      "magick",
+      "convert",
+      os.path.join(ASSETS_PATH, name),
+      "-auto-orient",
+      "-resize",
+      "120",
+      "-dither",
+      "FloydSteinberg",
+      "-remap",
+      "pattern:gray50",
+      "gif:fd:1",
+    ])).decode("utf8")
+
+    photos.append(f"""<div class="masonry-item"><a href="{href}" data-pswp-width="{width}" data-pswp-height="{height}" target="_blank"><img src="data:image/gif;base64,{data}" alt=""/></a></div>""".replace("\n", ""))
+
+  return "".join(photos)
+
+def initialize(name):
+  if " " in name:
+    a, b = name.split(" ", 2)
+    return a.upper()[0] + b.upper()[0]
+  raise KeyError
+
+
+def memory_html(obj):
+    try:
+      name = obj["name"]
+      message = obj["message"]
+    except KeyError:
+        return ""
+
+    try:
+      avatar_url = obj["avatar_url"]
+      avatar = f'<img class="inline-block h-16 w-16 rounded-full" src="{avatar_url}" alt="">'
+    except KeyError:
+      try:
+        initials = initialize(name)
+        avatar =  f"""
+          <span class="inline-flex items-center justify-center h-16 w-16 rounded-full bg-gray-500">
+            <span class="text-xl font-medium leading-none text-white">{initials}</span>
+          </span>
+        """
+      except:
+        avatar = AVATAR_PLACEHOLDER
+
+    return MEMORY_HTML.format(
+      name=name,
+      message=message,
+      avatar=avatar,
+    )
+
+def main():
+  pathlib.Path(OUT).mkdir(parents=True, exist_ok=True)
+  pathlib.Path(SITE).mkdir(parents=True, exist_ok=True)
+
+  try:
+    os.unlink(ASSETS_PATH)
+  except (FileNotFoundError, PermissionError):
+    pass
+  os.symlink("../../assets", ASSETS_PATH)
+
+  css = get_css()
+  js = get_js()
+  obit = get_obit()
+
+  photo_names = []
+  memories = ""
+  for name in os.listdir(SRC_PATH):
+    if not name.endswith(".json"):
+      continue
+    path = os.path.join(SRC_PATH, name)
+    with open(path) as f:
+      obj = json.load(f)
+      if obj["kind"] == "message":
+        memories = memories + memory_html(obj)
+      elif obj["kind"] == "photos":
+        photo_names.extend(obj["names"])
+
+  photos = get_photos(photo_names)
+
+  template = read(INDEX_TEMPLATE_PATH)
+  favicon = read(FAVICON_PATH)
+  index_souce = template.format(
+    css=css,
+    js=js,
+    obit=obit,
+    memories=memories,
+    favicon=favicon,
+    photos=photos,
+  )
+  with open(OUTPUT_PATH, "w") as f:
+    f.write(index_souce)
+
+if __name__ == "__main__":
+  main()

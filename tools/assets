@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+
+import argparse
+import sys
+import os
+import hashlib
+import subprocess
+from urllib.parse import quote
+
+URL = "https://storage.googleapis.com/ericphillips.xyz/assets/"
+GS = "gs://ericphillips.xyz/assets/"
+ROOT = os.path.dirname(os.path.dirname(__file__))
+ASSETS_PATH = os.path.join(ROOT, "assets")
+
+def download_url(url, out_file):
+  subprocess.check_call(["curl", "-L", "-#", "-o", out_file, url])
+
+def sha256_file(path):
+  with open(path, "br") as f:
+    s = f.read()
+  m = hashlib.sha256()
+  m.update(s)
+  return m.hexdigest()
+
+def do_fetch(args):
+  for name in os.listdir(ASSETS_PATH):
+    if not name.endswith(".sha256"):
+      continue
+    path = os.path.join(ASSETS_PATH, name)
+    with open(path) as f:
+      sha256 = f.read().strip()
+    file_name = name.removesuffix(".sha256") + "-" + sha256
+    file_path = os.path.join(ASSETS_PATH, file_name)
+    if os.path.isfile(file_path):
+      actual_sha256 = sha256_file(file_path)
+      if actual_sha256 != sha256:
+        os.remove(file_path)
+    if not os.path.isfile(file_path):
+      download_path = file_path + ".tmp"
+      url = URL + quote(file_name)
+      download_url(url, download_path)
+      actual_sha256 = sha256_file(download_path)
+      if actual_sha256 != sha256:
+        os.remove(download_path)
+        print("SHA256 mismatch for {} expected {} was {}".format(
+            download_path, sha256, actual_sha256))
+        return 1
+      os.rename(download_path, file_path)
+
+
+def do_add(args):
+  paths = args.PATH
+  for path in paths:
+    if not os.path.isfile(path):
+      print("No file found at {}".format(path))
+      return 1
+    sha256 = sha256_file(path)
+    name = os.path.basename(path)
+    stamp_name = name + ".sha256"
+    stamp_path = os.path.join(ASSETS_PATH, stamp_name)
+    gs_path = GS + name + "-" + sha256
+    subprocess.check_call(["gsutil", "cp", path, gs_path])
+    with open(stamp_path, "w") as f:
+      f.write(sha256)
+
+
+def main():
+  parser = argparse.ArgumentParser()
+  subparsers = parser.add_subparsers()
+  add = subparsers.add_parser("add")
+  add.set_defaults(func=do_add)
+  add.add_argument("PATH", nargs="+")
+
+  fetch = subparsers.add_parser("fetch")
+  fetch.set_defaults(func=do_fetch)
+
+  args = parser.parse_args()
+  return args.func(args)
+
+if __name__ == '__main__':
+  sys.exit(main())
