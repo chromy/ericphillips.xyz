@@ -1,13 +1,10 @@
-name = "ericphillips-home"
-type = "javascript"
-zone_id = "95714e638651d005e89c0a29a06dd3c1"
+name = "ericphillips-xyz-home"
+compatibility_date = "2023-04-15"
 routes = [
   "ericphillips.xyz",
   "ericphillips.xyz/"
 ]
-usage_model = ""
-compatibility_flags = []
-compatibility_date = "2022-01-15"
 kv_namespaces = [
   { binding = "TRAFFIC", id = "6408a3ae6678454f8528d8c3d7da63c2" }
 ]
+main = "index.js"
